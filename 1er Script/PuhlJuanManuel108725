@@ -1,0 +1,150 @@
+#! /usr/bin/env python
+from scapy.all import *
+import sys
+import signal
+import socket
+
+#----------------------------------------------------------------------------------------------------
+def resultado():
+	print "Sent ",sentCount," Received ",receivedCount
+	sys.exit(0)
+#----------------------------------------------------------------------------------------------------
+def signal_handler(sig,frame):
+	print ""
+	resultado()
+#----------------------------------------------------------------------------------------------------	
+def sendPackage(ip,port):
+	packet = IP(dst=ip)/TCP(dport=port,sport=random.randint(49152,65535),flags="S")
+	response = sr1(packet,timeout = 2, verbose = 0)
+	global sentCount
+	sentCount += 1
+	if response is not None:
+		print "Reply from "+ip+", Port: "+str(port) +", Flags: "+response.sprintf("%TCP.flags%")
+		global receivedCount
+		receivedCount +=1
+		return 1
+	else:
+		print "No response"
+		return 0
+#----------------------------------------------------------------------------------------------------
+def printErrors(index):
+	if index==0:
+		print "ERROR: Wrong number of arguments. Use -h or --help for info"
+	if index==1:
+		print "ERROR: Only one argument passed but it's not the help command"
+	if index==2:
+		print "ERROR: Count passed but no valid message count..."
+	if index==3:
+		print "ERROR: Invalid message count. Must be greater than zero"
+	if index==4:
+		print "ERROR: Invalid arguments. Use -h or --help for info"
+	if index==5:
+		print "ERROR: Invalid port. Must be grater than zero"
+	if index==6:
+		print "ERROR: Invalid IP address"
+	if index==7:
+		print "ERROR: Port passed but no valid port number"
+	sys.exit(0)	
+#----------------------------------------------------------------------------------------------------
+#Metodo auxiliar para imprimir por pantalla la ayuda
+def showHelp():
+	print "Usage:"
+	print "1. PuhlJuanManuel108725 [-h] [-c count] [-p port] destination"
+	print "2. PuhlJuanManuel108725 [--help] [--count count] [--port port] destination"	
+#----------------------------------------------------------------------------------------------------
+#Metodo auxiliar para chequear la direccion IP ingresada
+def checkIP(add):
+	try:
+		socket.inet_aton(add)
+	except socket.error:
+  	    return printErrors(6)
+	global dstAddress
+	dstAddress = add
+	return 1	
+#----------------------------------------------------------------------------------------------------
+#Metodo auxiliar para setear la cantidad de mensajes a enviar
+def setNewCount(count):
+	global cantMessages
+	if count.isdigit(): #Si es un numero
+		n = int(count) #Lo convierto a entero
+		if n>0:
+			cantMessages = n
+			return 1
+		else:
+			return printErrors(3)
+	else:
+		return printErrors(2)
+	return 0
+#----------------------------------------------------------------------------------------------------
+#Metodo auxiliar para setear el nuevo valor del puerto
+def setNewPort(p):
+	global port
+	if p.isdigit():
+		n = int(p)
+		if n>0:
+			port = n
+			return 1
+		else:
+			return printErrors(5)
+	else:
+		return printErrors(7)
+	return 0
+#----------------------------------------------------------------------------------------------------	
+def checkArguments(args):
+	cantArgs = len(args)
+	# El primer argumento en la lista va a ser la direccion del archivo
+	# Voy revisando los argumentos
+	if cantArgs==2: #Solo puede haber ingresado el menu de ayuda
+		if args[1] == '-h' or args[1] == '--help':
+			return showHelp() #Imprimo ayuda
+		else: #Asumo que es la direccion IP
+			if checkIP(args[1]): #Chequeo si es valida
+				return 1 
+			else:
+				return printErrors(1) #En caso de que no lo sea, imprimo el error
+	elif cantArgs==4:    #En este caso, solo puede ser que se especifica el puerto, o el count
+		if args[1] == '-c' or args[1] == '--count':
+			if setNewCount(args[2])>0: #Si es un valor valido de mensajes a enviar... 
+				return checkIP(args[3]) #Sigo adelante y chequeo la ip 
+		elif args[1] == '-p' or args[1] == '--port':
+			if setNewPort(args[2])>0: #Seteo el puerto
+				return checkIP(args[3]) #Si no hubo error chequeo la IP
+		else:
+			return printErrors(4)
+	elif cantArgs==6:    #En este caso, tenemos count, numero, port, puerto y destination
+		if args[1] == '-c' or args[1] == '--count': #Chequeo que haya ingresado el -c
+			if setNewCount(args[2]):  #Seteo el numero de mensajes...
+				if args[3] == '-p' or args[3] == '--port': #Si todo sale bien chequeo que haya ingresado -p o --port
+					if setNewPort(args[4]): #Seteo el puerto
+						return checkIP(args[5]) #Chequeo la ip
+				else:
+					return printErrors(4) #Si no esta el -p imprimo error
+		else:
+			return printErrors(4) # Si no esta el -c imprimo error
+	else:
+		return printErrors(0) #Si ingreso cualquier otra combinacion imprimo error 	
+#----------------------------------------------------------------------------------------------------
+def main():
+	global cantMessages
+	global dstAddress
+	global port
+	if checkArguments(sys.argv):
+		if cantMessages>0: #Si hay al menos un mensaje a enviar es porque se ingreso -c
+			while cantMessages>0: #Mientras hayan mensajes...
+				cantMessages = int(cantMessages)-1 
+				sendPackage(dstAddress,port) #Envio un paquete 
+				signal.signal(signal.SIGINT,signal_handler) #Chequeo si el usuario ingresa ctrl-c
+			resultado() #Imprimo el resultado de la operacion
+		else: #Sino...
+			while 1: #Hasta el final de los finales... o aparezca el ctrl-c... lo que pase primero
+				sendPackage(dstAddress,port) #Envio un paquete
+				signal.signal(signal.SIGINT,signal_handler)	#Chequeo si el usuario ingresa ctrl-c
+#----------------------------------------------------------------------------------------------------	
+if __name__=="__main__": 
+	contador = 0
+	cantMessages = 0
+	dstAddress = ""
+	port = 80
+	sentCount = 0
+	receivedCount = 0
+	main() #Llamo al metodo principal

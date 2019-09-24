@@ -1,0 +1,156 @@
+#!/usr/bin/python
+from scapy.all import *
+import sys
+import signal
+import struct
+import socket
+import fcntl
+
+#Metodo auxiliar para imprimir por pantalla el resultado de la operacion
+def resultado():
+	print "Sent ",sendCount," Received ",receivedCount
+	sys.exit(0)
+
+#Metodo auxiliar para manejar el ctrl+c
+def signal_handler(sig,frame):
+	print "" #Imprimo un salto de linea para que luego el resultado no tenga al principio el ctrl+c
+	resultado()
+
+#Metodo auxiliar para imprimir por pantalla la ayda
+def printErrors(index):
+    if index==0:
+        print "ERROR: Wrong number of arguments. Use -h or --help for info"
+    if index==1:
+        print "ERROR: Only one argument passed but it's not the help command. Use -h or --help for info"
+    if index==2:
+        print "ERROR: Count passed but no valid message count. Use -h or --help for info"
+    if index==3:
+        print "ERROR: Invalid message count. Must be greater than zero"
+    if index==4:
+        print "ERROR: Device command required. Use -h or --help for info"
+    if index==5:
+        print "ERROR: Invalid Device"
+    if index==6:
+        print "ERROR: Invalid IP address"
+    if index==7:
+	print "ERROR: Wrong arguments. Use -h or --help for info"
+    return 0
+
+#Metodo donde armo paquete y envio/recibo
+def ping(mac,srcAddress,dstAddress):
+    packet= Ether(type=0x806,dst="ff:ff:ff:ff:ff:ff",src = mac)/ARP(op=1,hwsrc = mac,psrc = srcAddress , pdst=dstAddress)
+    ans=srp1(packet,verbose=0,timeout=1)
+    global sendCount
+    sendCount+=1
+    if ans is not None:#Si recibi respuesta
+		dstMac=ans.hwsrc#Obtengo la direccion MAC
+		newSrcAddress=ans.psrc#Obtengo la direccion IP
+		print('Reply from '+ newSrcAddress + ' [' + dstMac + ']')
+		global receivedCount
+		receivedCount+=1#Aumento en 1 la cantidad de mensajes recibidos
+		return 1
+    else: #Si no hubo respuesta...
+		print("No reply")
+		return 0
+
+#Metodo auxiliar para obtener la direccion MAC de la interfaz
+def getMacAddress(dev):
+    global mac
+    mac=get_if_hwaddr(dev)
+
+#Metodo auxiliar para verificar que el dispositivo sea correcto
+def checkDevice(dev):
+    global device
+    device = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    global srcAddress
+    try:
+        srcAddress = socket.inet_ntoa(fcntl.ioctl(
+			device.fileno(),
+			0x8915,
+			struct.pack('256s', dev[:15])
+			)[20:24])
+    except:
+        return 0
+    getMacAddress(dev)
+    return 1
+
+#Metodo auxiliar para verificar que la ip sea correcta
+def checkAddress(add):
+    try:
+  	    socket.inet_aton(add)
+    except socket.error:
+  	    return 0
+    global dstAddress
+    dstAddress = add
+    return 1
+
+
+#Metodo auxiliar para chequear los argumentos de dispositivo y direccion ip
+def checkDeviceArgument(args,index):
+    if args[index] == '-d' or args[index] == '--device':
+        if checkDevice(args[index+1]):
+            if checkAddress(args[index+2]):
+                return 1
+            else:
+                return printErrors(6)
+        else:
+            return printErrors(5)
+    else:
+        return printErrors(4)
+
+#Metodo Auxiliar para chequear los argumentos pasados
+def checkArguments(args):
+    cantArgs = len(args)
+    # El primer argumento en la lista va a ser la direccion del archivo
+    # Voy revisando los argumentos
+    if cantArgs==2: #Solo puede haber ingresado el menu de ayuda
+        if args[1] == '-h' or args[1] == '--help':
+            return help() #Imprimo ayuda
+        else:
+            return printErrors(1)
+    elif cantArgs==4:    #En este caso, solo puede ser dev, nombre dispositivo y destination. En otro caso ERROR
+        return checkDeviceArgument(args,1)
+    elif cantArgs==6:    #En este caso, tenemos count, numero, dev, nombre dispositivo y destination
+        if args[1] == '-c' or args[1] == '--count': #Chequeo que haya ingresado el -c
+            if args[2].isdigit():  #Chequeo si hay un numero de mensajes a enviar
+                n = int(args[2])
+                if n > 0:   # Si es mayor a cero entonces prosigo chequeando el -d
+                    global cantMessages
+                    cantMessages = args[2]
+                    return checkDeviceArgument(args,3)
+                else:
+                    return printErrors(3)
+            else:
+                return printErrors(2)
+        else:
+		return printErrors(7)
+    else: #En cualquier otro caso
+        return printErrors(0)
+    return 0
+#Metodo Auxiliar para imprimir la ayuda por pantalla
+def help():
+    print "Usage:"
+    print "1. PuhlJuanManuel108725 [-h] [-c count] [-d device] destination"
+    print "2. PuhlJuanManuel108725 [--help] [--count count] [--device device] destination"
+    print "[-d device] destination always required"
+    return 0
+
+#A PARTIR DE AQUI SE EJECUTA AL INICIAR EL PROGRAMA
+cantMessages = 0
+srcAddress = ""
+dstAddress = ""
+device = ""
+mac = ""
+sendCount = 0
+receivedCount = 0
+if checkArguments(sys.argv):
+    if cantMessages>0: #Si el usuario ingreso una cantidad fija de mensajes who-has...
+        while cantMessages>0: #Mientras hayan mensajes para enviar...
+			cantMessages = int(cantMessages)-1
+			signal.signal(signal.SIGINT,signal_handler)
+			ping(mac,srcAddress,dstAddress) #Envio paquetes
+    else:#Sino...
+        while 1:#Hasta que el usuario corte
+			signal.signal(signal.SIGINT,signal_handler)
+			ping(mac,srcAddress,dstAddress)#Envio paquetes
+    resultado()#Muestro por pantalla el resultado

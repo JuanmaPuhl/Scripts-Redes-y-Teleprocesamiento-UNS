@@ -1,0 +1,175 @@
+#! /usr/bin/env python
+from scapy.all import *
+import sys
+import socket
+#----------------------------------------------------------------------------------------------------
+#Metodo auxiliar para imprimir por pantalla la ayuda
+def showHelp():
+	print "Usage:"
+	print "1. PuhlJuanManuel108725 [-h] FQDN"
+	print "2. PuhlJuanManuel108725 [--help] FQDN"	
+#----------------------------------------------------------------------------------------------------		
+#Metodo que envia paquete
+def trace(nombre,tipo,ipdst,recd,reca):
+	try:
+		packet = IP(dst=ipdst)/UDP(dport=53)/DNS(rd=recd,ra=reca,qd=DNSQR(qname=nombre, qtype = tipo))
+		ans = sr1(packet,verbose=0,timeout = 3)
+		return ans
+	except Exception:
+		print "Error while sending packet"
+	
+#----------------------------------------------------------------------------------------------------
+#Metodo auxiliar que imprime errores
+def printErrors(index):
+	if index==0:
+		print "ERROR: Wrong number of arguments. Use -h or --help for info"
+	if index==1:
+		print "ERROR: Invalid FQDN."
+	sys.exit(0)	
+#----------------------------------------------------------------------------------------------------	
+#Metodo auxiliar para obtener la ip almacenada en /etc/resolv.conf
+def getIP():
+	resolvers = []
+	try:
+		with open('/etc/resolv.conf','r') as resolvconf:
+			for line in resolvconf.readlines():
+				if 'nameserver' in line:
+					a = line.split(' ')
+					i=1
+					while i < len(a):
+						resolvers.append(a[i])
+						i+=1
+					ultimo = resolvers[len(resolvers)-1]
+					resolvers.remove(ultimo)
+					if ultimo[len(ultimo)-1] == "\n":
+						ultimo=ultimo[0:len(ultimo)-1]
+					if ultimo!="":
+						resolvers.append(ultimo)
+ 		return resolvers
+	except IOError as error:
+		print("No DNS server found")
+		sys.exit(1)
+#----------------------------------------------------------------------------------------------------
+#Metodo auxiliar para verificar si el fqdn ingresado es valido. (Solo verifica sintacticamente)
+def checkFQDN(hostname):
+	if len(hostname) > 255:
+		return false
+	if hostname[-1] == ".":
+		hostname = hostname[:-1]
+	allowed = re.compile("(?!-)[A-Z\d-]{1,63}(?<!-)$", re.IGNORECASE)
+	return all(allowed.match(x) for x in hostname.split("."))
+#----------------------------------------------------------------------------------------------------	
+#Metodo auxiliar para verificar si el fqdn ingresado es valido. Pide la ip asociada al fqdn. Si la obtiene existe. Sino no.
+def checkFQDN2(hostname):
+	try:
+		socket.gethostbyname(hostname)
+		global fqdn
+		fqdn = hostname
+		return 1
+	except socket.error:
+		print "Error: Invalid FQDN."
+		exit(0)
+#----------------------------------------------------------------------------------------------------	
+#Metodo auxiliar para chequear que los argumentos sean correctos
+def checkArguments(args):
+	cantArgs = len(args)
+	# El primer argumento en la lista va a ser la direccion del archivo
+	# Voy revisando los argumentos
+	if cantArgs==2: #Solo puede haber ingresado el menu de ayuda
+		if args[1] == '-h' or args[1] == '--help':
+			return showHelp() #Imprimo ayuda
+		else:
+			if checkFQDN(args[1]):
+				return checkFQDN2(args[1])
+			else:
+				print "Invalid FQDN."
+				return 0
+	else:
+		return printErrors(0) #Si ingreso cualquier otra combinacion imprimo error 	
+#----------------------------------------------------------------------------------------------------	
+#Metodo auxiliar para enviar paquetes y obtener datos. Primer caso
+def ejecutar1 (nombre,tipo,ipdst,i,j):
+	global maxS1
+	global maxS3
+	aux=trace(nombre,tipo,ipdst,i,j);
+	if aux is not None:
+		for p in range(aux[DNS].ancount):
+			ans2=trace(aux[DNS].an[p].rdata,"A",ipdst,i,j)
+			s1 = "\""+nombre+"\""
+			sAux = " " * (maxS1-len(s1)) 
+			s2 = aux[DNS].an[p].get_field('type').i2repr(aux[DNS].an[p],aux[DNS].an[p].type)
+			s3 = "\t"+aux[DNS].an[p].rdata
+			s4 = ans2[DNS].an[0].rdata
+			sAux2 = " " * (maxS3 - len(s3))
+			print s1+ sAux+"IN\t"+s2+s3+sAux2+s4
+		return 1
+	return 0	
+#----------------------------------------------------------------------------------------------------
+#Metodo auxiliar para enviar paquetes y obtener datos. Segundo caso
+def ejecutar2 (nombre,tipo,ipdst,i,j):
+	global maxS1
+	global maxS3
+	ans=trace(nombre,tipo,ipdst,i,j)
+	if ans is not None:
+		for n in range(ans[DNS].ancount):
+			s1 = "\""+nombre+"\""
+			sAux = " " * (maxS1-len(s1)) 
+			s2 = ans[DNS].an[n].get_field('type').i2repr(ans[DNS].an[n],ans[DNS].an[n].type)
+			s3 = "\t"+ans[DNS].an[n].rdata
+			print s1+ sAux+"IN\t"+s2+s3
+		return 1
+	return 0
+
+#----------------------------------------------------------------------------------------------------
+#Metodo auxiliar para seleccionar el servidor dns a utilizar
+def selectDst(names):
+	termine = 0
+	i=0
+	while termine == 0 and i<len(names):
+		print "Trying with "+names[i]+"."
+		if ejecutar1(".","NS",names[i],0,0):
+			termine = 1
+			return names[i]
+		else:
+			i+=1
+	if termine == 0:
+		print "Error. Exiting..."
+		sys.exit(0)
+						
+#----------------------------------------------------------------------------------------------------
+#Metodo principal
+def main():
+	global dns
+	global fqdn
+	global maxS1
+	global maxS3
+	global longDiv
+	if checkArguments(sys.argv):
+		destinations = getIP()		
+		dns = destinations[0]
+		destinations.append("8.8.8.8")#Agrego los servidores de Google
+		destinations.append("8.8.4.4")
+		print "-"*longDiv #Imprimo la UI
+		print "FQDN: " + fqdn
+		print "Trace "+"-"*(longDiv-6)
+		hstName = fqdn.split('.')#Separo el fqdn
+		toSearch=""
+		i = len(hstName)-1
+		destino = selectDst(destinations); #Obtengo la direccion del server a utilizar
+		print "-"*longDiv #UI
+		while i > -1:
+			toSearch = hstName[i]+"."+toSearch #Voy agregando los dominios
+			if toSearch == fqdn+".": #Si ya tengo el fqdn completo...
+				ejecutar2(toSearch,"A",destino,1,1)
+			else: #Sino...
+				ejecutar1(toSearch,"NS",destino,1,1)
+			print "-"*longDiv #UI
+			i-=1
+#----------------------------------------------------------------------------------------------------	
+if __name__=="__main__": 
+	maxS1 = 32 #Especifica el maximo para la primera seccion de datos
+	maxS3 = 32 #Especifica el  maximo para la tercer seccion de datos
+	longDiv = 95 #Especifica el maximo de las barras separadoras
+	fqdn = "" 
+	dns = ""
+	main() #Llamo al metodo principal
